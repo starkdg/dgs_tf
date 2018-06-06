@@ -182,18 +182,19 @@ parser.add_argument('-r', '--learning_rate', type=float, default=0.005, help="Le
 parser.add_argument('-s', '--steps', type=int, default=120, help="Number of steps")
 parser.add_argument('-b', '--batch_size', type=int, default=5, help="Batch Size")
 parser.add_argument('-l', '--strength', type=float, default=0.00001, help="L1 Regularization Strength")
-
 args = parser.parse_args()
 
-learning_rate = args.learning_rate
-steps = args.steps
-batch_size = args.batch_size
-l1_reg = args.strength
+print("parameters:")
+print("alpha = ", args.learning_rate)
+print("steps = ", args.steps)
+print("batch size = ", args.batch_size)
+print("L1 reg. strength = ", args.strength)
+
 linear_classifier, train_losses, validation_losses = train_linear_model(
-    learning_rate=learning_rate,
-    steps=steps,
-    batch_size=batch_size,
-    l1_regularization_strength=l1_reg,
+    learning_rate=args.learning_rate,
+    steps=args.steps,
+    batch_size=args.batch_size,
+    l1_regularization_strength=args.strength,
     feature_columns=construct_feature_columns(training_examples),
     training_examples=training_examples,
     training_targets=training_targets,
@@ -228,6 +229,7 @@ test_result_df = pd.DataFrame()
 test_result_df['PassengerId'] = test_data_set['PassengerId']
 test_result_df['Survived'] = test_classes
 print("save file to csv")
-test_result_df.to_csv("titanic_data/linear_model_sex_x_pclass_submission.csv", sep=",", index=False)
+test_result_df.to_csv("titanic_data/linear_model_sex_x_pclass_submission.csv",
+                      sep=",", index=False)
 
 input("Hit Enter")
