@@ -3,64 +3,81 @@
 import numpy as np
 import pandas as pd
 import tensorflow as tf
+import os
+import ast
 import argparse
+import glob
+from sklearn import metrics
+from matplotlib import pyplot as plt
+from pandas.api.types import CategoricalDtype
 
-def process_events(frame):
-    events = pd.DataFrame()
-    events['event'] = frame['event'].apply(lambda x: np.array(x).flatten())
-    return events
-    
 
-def process_classes(frame):
+def process_features(dataframe):
+
+    df = pd.DataFrame()
+    df['event'] = dataframe['event'].apply(
+        lambda x: np.array(ast.literal_eval(x)).flatten())
+
+    new_columns = ["Input" + str(x) for x in range(800)]
+
+    df2 = pd.DataFrame()
+    df2[new_columns] = pd.DataFrame(
+        df['event'].values.tolist(), columns=new_columns)
+    return df2
+
+
+def process_targets(frame):
+    cat_type = CategoricalDtype(categories=['b', 'k', 'r'], ordered=True)
     targets = pd.DataFrame()
-    targets['class'] = frame['class']
+    targets['class'] = frame['class'].astype(cat_type).cat.codes.astype(int)
+
     return targets
 
 
 def split_dataframe(df):
-    #randomly permute examples
+    #  randomly permute examples
     src_df = df.reindex(np.random.permutation(df.index))
 
-    training_df = src_df.iloc[:50,:]
-    validation_df = src_df.iloc[50:100,:]
-    testing_df = src_df.iloc[100:,:]
+    training_df = src_df.iloc[:50, :]
+    validation_df = src_df.iloc[50:100, :]
+    testing_df = src_df.iloc[100:, :]
 
     return training_df, validation_df, testing_df
-   
 
 
-def create_training_input_fn(features, labels, batch_size):
+def create_training_input_fn(
+        features, labels, batch_size, num_epochs=None, shuffle=True):
 
-    def _input_fn(num_epochs=None, Shuffle=True):
-        idx = np.random.permutation(features.index)
-        raw_features = {"event": features.reindex(idx)}
-        raw_targets = np.array(labels[idx])
-
-        ds = Dataset.from_tensor_slices((raw_features, raw_targets))
+    def _input_fn():
+        raw_features = {"sensordata": features.values}
+        raw_labels = np.array(labels)
+        ds = tf.data.Dataset.from_tensor_slices((raw_features, raw_labels))
         ds = ds.batch(batch_size).repeat(num_epochs)
         if shuffle:
-            ds = ds.shuffle(10000)
+            ds = ds.shuffle(100)
         feature_batch, label_batch = ds.make_one_shot_iterator().get_next()
-        
+        return feature_batch, label_batch
+
     return _input_fn
 
 
 def create_predict_input_fn(features, labels, batch_size):
+
     def _input_fn():
-        raw_features = {"event": features.values}
-        raw_targets = np.array(labels)
+        raw_features = {"sensordata": features.values}
+        raw_labels = np.array(labels)
 
-        ds = Dataset.from_tensor_slices((raw_features, raw_targets))
-        ds = ds.batch(batch_size)
-
+        ds = tf.data.Dataset.from_tensor_slices((raw_features, raw_labels))
+        ds = ds. batch(batch_size)
         feature_batch, label_batch = ds.make_one_shot_iterator().get_next()
         return feature_batch, label_batch
+
     return _input_fn
 
 
 def construct_feature_columns():
 
-    return set([tf.feature_column.numeric_column('events', shape=800)])
+    return set([tf.feature_column.numeric_column('sensordata', shape=800)])
 
 
 def train_model(learning_rate,
@@ -74,12 +91,15 @@ def train_model(learning_rate,
 
     periods = 10
     steps_per_period = steps / periods
-    
-    training_input_fn =create_training_input_fn(training_examples, training_targets, batch_size)
-    predict_training_input_fn = create_predict_input_fn(training_examples, training_targets, batch_size)
-    predict_validation_input_fn = create_predict_input_fn(validation_examples, validation_targets, batch_size)
 
-    my_optimizer = tf.train.FtrlOptimizer(learning_rate=learning_rate)
+    training_input_fn = create_training_input_fn(
+        training_examples, training_targets, batch_size)
+    predict_training_input_fn = create_predict_input_fn(
+        training_examples, training_targets, batch_size)
+    predict_validation_input_fn = create_predict_input_fn(
+        validation_examples, validation_targets, batch_size)
+
+    my_optimizer = tf.train.AdagradOptimizer(learning_rate=learning_rate)
     my_optimizer = tf.contrib.estimator.clip_gradients_by_norm(
         my_optimizer, 5.0)
     dnn_classifier = tf.estimator.DNNClassifier(
@@ -90,40 +110,68 @@ def train_model(learning_rate,
     )
 
     print("Training Model ...")
-    training_errors = []
-    validation_errors = []
+    training_losses = []
+    validation_losses = []
     for period in range(0, periods):
-    
-        dnn_classifier.train(input_fn=training_input_fn ,steps=steps_per_period)
+        dnn_classifier.train(
+            input_fn=training_input_fn, steps=steps_per_period)
 
-        training_predictions = list(dnn_classifier.predict(input_fn=predict_training_input_fn))
-        training_probabilities = np.array([item['probabilities'][0] for item in training_predictions])
-        training_pred_class_id = np.array([item['class_ids'][0] for item in training_predictions])
+        training_predictions = dnn_classifier.predict(
+            input_fn=predict_training_input_fn)
+        training_pred_class_id = np.array(
+            [item['class_ids'][0] for item in training_predictions])
         training_pred_one_hot = tf.keras.utils.to_categorical(training_pred_class_id, 3)
-
-        validation_predictions = list(classifier.predict(input_fn=predict_validation_input_fn))
-        validation_probabilities = np.array([item['probabilities'] for item in validation_predictions])
-        validation_pred_class_id = np.array([item['class_ids'][0] for item in validation_predictions])
+        
+        validation_predictions = list(dnn_classifier.predict(
+            input_fn=predict_validation_input_fn))
+        validation_pred_class_id = np.array(
+            [item['class_ids'][0] for item in validation_predictions])
         validation_pred_one_hot = tf.keras.utils.to_categorical(validation_pred_class_id, 3)
 
-        training_logloss = metrics.log_loss(training_targets, training_pred_one_hot)
-        validation_logloss = metrics.log_loss(validation_targets, validation_pred_one_hot)
 
-        training_errors.append(training_logloss)
-        validation_errors.append(validation_logloss)
+        training_loss = metrics.log_loss(training_targets, training_pred_one_hot)
+        validation_loss = metrics.log_loss(validation_targets, validation_pred_one_hot)
         
-        print("  period {0} : {1:.4f}".format(period, validation_logloss))
-        
+        training_losses.append(training_loss)
+        validation_losses.append(validation_loss)
 
-    map(os.remove, glob.glob(os.path.join(classifier.model_dir, 'events.out.tfevents*')))
+        print("  period {0} : {1:.4f}".format(period, validation_loss))
 
-    final_predictions = dnn_classifier.predict(input_fn=predict_validation_input_fn)
-    final_predictions = np.array([item['class_ids'][0] for item in final_predictions])
+    print("Model training finished.")
+    map(os.remove, glob.glob(os.path.join(
+        dnn_classifier.model_dir, 'events.out.tfevents*')))
+
+    final_predictions = dnn_classifier.predict(
+        input_fn=predict_validation_input_fn)
+    final_predictions = np.array(
+        [item['class_ids'][0] for item in final_predictions])
     accuracy = metrics.accuracy_score(validation_targets, final_predictions)
-    print("Final accuracy (on validation data): ", accuracy)
-    
+    print("Final accuracy score (on validation data) ", accuracy)
+
+    plt.ylabel("Loss")
+    plt.xlabel("Periods")
+    plt.title("LogLoss vs. Periods")
+    plt.plot(training_losses, label="training")
+    plt.plot(validation_losses, label="validation")
+    plt.legend()
+    plt.draw()
+    plt.pause(5)
+    input("Hit Enter")
+
     return dnn_classifier
-    
+
+
+def run_tests(classifier, test_examples, test_targets):
+    predict_test_input_fn = create_input_fn(
+        test_examples, test_targets, 1, num_epochs=1, shuffle=False)
+
+    test_predictions = classifier.predict(input_fn=predict_test_input_fn)
+
+    test_pred_class_id = np.array(
+        [item['class_ids'][0] for item in test_predictions])
+    test_loss = tf.keras.losses.categorical_crossentropy(test_targets, test_pred_class_id)
+    return test_loss
+
 
 parser = argparse.ArgumentParser(description='ML Touch Events')
 parser.add_argument('-r', '--learning_rate', type=float, default=0.005, help="Learning rate")
@@ -138,38 +186,32 @@ print("steps = ", args.steps)
 print("batch size = ", args.batch_size)
 print("l1 reg. strength = ", args.strength)
 
-
+print("read in csv file")
 src_df = pd.read_csv("touch_events.csv", sep=",")
 
 print("division of classes")
 print(src_df.groupby(['class']).count())
 
-print("split data set")
 traindf, valid_df, test_df = split_dataframe(src_df)
 
-training_examples = process_events(traindf)
-training_targets = process_classes(traindf)
+training_examples = process_features(traindf)
+training_targets = process_targets(traindf)
 
-valid_examples = process_events(valid_df)
-valid_targets = process_classes(valid_df)
+validation_examples = process_features(valid_df)
+validation_targets = process_targets(valid_df)
 
-test_examples = process_events(test_df)
-test_targets = process_classes(test_df)
+test_examples = process_features(test_df)
+test_targets = process_targets(test_df)
 
-
-hidden_units = [512, 512, 64]
+hidden_units = [1024, 1024, 512, 32]
 classifier = train_model(args.learning_rate,
                          args.steps,
                          args.batch_size,
                          hidden_units,
                          training_examples,
                          training_targets,
-                         valid_examples,
-                         valid_targets)
-
-
-
-
+                         validation_examples,
+                         validation_targets)
 
 
 
