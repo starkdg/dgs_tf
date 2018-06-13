@@ -26,13 +26,13 @@ def preprocess_features(dataframe):
     # synthetic features
     processed_features['FamilySize'] = processed_features['Parch'] + processed_features['SibSp'] + 1
     processed_features['IsMinor'] = (processed_features['Age'] < 16).astype(float)
-    return processed_features
+    return processed_features.values
 
 
 def preprocess_targets(dataframe):
     output_targets = pd.DataFrame()
     output_targets["Survived"] = dataframe["Survived"]
-    return output_targets
+    return output_targets.values
 
 
 def get_quantile_based_boundaries(feature_values, num_buckets):

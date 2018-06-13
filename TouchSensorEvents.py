@@ -39,8 +39,8 @@ def split_dataframe(df):
     src_df = df.reindex(np.random.permutation(df.index))
 
     training_df = src_df.iloc[:50, :]
-    validation_df = src_df.iloc[50:100, :]
-    testing_df = src_df.iloc[100:, :]
+    validation_df = src_df.iloc[50:90, :]
+    testing_df = src_df.iloc[90:, :]
 
     return training_df, validation_df, testing_df
 
@@ -99,7 +99,8 @@ def train_model(learning_rate,
     predict_validation_input_fn = create_predict_input_fn(
         validation_examples, validation_targets, batch_size)
 
-    my_optimizer = tf.train.AdagradOptimizer(learning_rate=learning_rate)
+    my_optimizer = tf.train.AdagradOptimizer(
+        learning_rate=learning_rate)
     my_optimizer = tf.contrib.estimator.clip_gradients_by_norm(
         my_optimizer, 5.0)
     dnn_classifier = tf.estimator.DNNClassifier(
@@ -107,6 +108,7 @@ def train_model(learning_rate,
         n_classes=3,
         hidden_units=hidden_units,
         optimizer=my_optimizer,
+        model_dir="model"
     )
 
     print("Training Model ...")
@@ -122,8 +124,8 @@ def train_model(learning_rate,
             [item['class_ids'][0] for item in training_predictions])
         training_pred_one_hot = tf.keras.utils.to_categorical(training_pred_class_id, 3)
         
-        validation_predictions = list(dnn_classifier.predict(
-            input_fn=predict_validation_input_fn))
+        validation_predictions = dnn_classifier.predict(
+            input_fn=predict_validation_input_fn)
         validation_pred_class_id = np.array(
             [item['class_ids'][0] for item in validation_predictions])
         validation_pred_one_hot = tf.keras.utils.to_categorical(validation_pred_class_id, 3)
@@ -161,23 +163,42 @@ def train_model(learning_rate,
     return dnn_classifier
 
 
-def run_tests(classifier, test_examples, test_targets):
-    predict_test_input_fn = create_input_fn(
-        test_examples, test_targets, 1, num_epochs=1, shuffle=False)
+def evaluate_classifier(classifier, examples, targets):
+    eval_input_fn = create_predict_input_fn(
+        examples, targets, 1)
+    results = classifier.evaluate(eval_input_fn, steps=100, )
+    print("Evaluate classifier:")
+    for key in results:
+        print("  {0} : {1}".format(key, results[key]))
+        
 
-    test_predictions = classifier.predict(input_fn=predict_test_input_fn)
+def run_tests(classifier, examples, targets):
+    predict_test_input_fn = create_predict_input_fn(
+        examples, targets, 1)
 
-    test_pred_class_id = np.array(
-        [item['class_ids'][0] for item in test_predictions])
-    test_loss = tf.keras.losses.categorical_crossentropy(test_targets, test_pred_class_id)
-    return test_loss
+    final_predictions = classifier.predict(input_fn=predict_test_input_fn)
+    predicted_classes = np.array(
+        [item['class_ids'][0] for item in final_predictions])
+
+    cm = metrics.confusion_matrix(targets.values, predicted_classes)
+    print("Confusion Matrix:")
+    print(cm)
+
+    accuracy = metrics.accuracy_score(targets.values, predicted_classes)
+    print("accuracy: ", accuracy)
+
+    target_names = ['b', 'k', 'r']
+    print(metrics.classification_report(targets.values, predicted_classes, target_names=target_names))
+
+    return accuracy
 
 
 parser = argparse.ArgumentParser(description='ML Touch Events')
-parser.add_argument('-r', '--learning_rate', type=float, default=0.005, help="Learning rate")
-parser.add_argument('-s', '--steps', type=int, default=120, help="Number of steps")
+parser.add_argument('-r', '--learning_rate', type=float, default=0.0005, help="Learning rate")
+parser.add_argument('-s', '--steps', type=int, default=500, help="Number of steps")
 parser.add_argument('-b', '--batch_size', type=int, default=5, help="Batch Size")
-parser.add_argument('-l', '--strength', type=float, default=0.00001, help="L1 Regularization Strength")
+parser.add_argument('-l', '--strength', type=float, default=0., help="L1 Regularization Strength")
+parser.add_argument('-a', '--hidden_units', nargs='+', type=int, default = [500, 500, 250], help="hidden units")
 args = parser.parse_args()
 
 print("parameters:")
@@ -185,8 +206,7 @@ print("alpha = ", args.learning_rate)
 print("steps = ", args.steps)
 print("batch size = ", args.batch_size)
 print("l1 reg. strength = ", args.strength)
-
-print("read in csv file")
+print("no. nodes in hidden layers = ", args.hidden_units)
 src_df = pd.read_csv("touch_events.csv", sep=",")
 
 print("division of classes")
@@ -203,16 +223,22 @@ validation_targets = process_targets(valid_df)
 test_examples = process_features(test_df)
 test_targets = process_targets(test_df)
 
-hidden_units = [1024, 1024, 512, 32]
 classifier = train_model(args.learning_rate,
                          args.steps,
                          args.batch_size,
-                         hidden_units,
+                         args.hidden_units,
                          training_examples,
                          training_targets,
                          validation_examples,
                          validation_targets)
 
 
+evaluate_classifier(classifier, validation_examples, validation_targets)
+
+print("Run tests on validation examples")
+run_tests(classifier, validation_examples, validation_targets)
+
+print("Run tests on test examples")
+run_tests(classifier, test_examples, test_targets)
 
 
