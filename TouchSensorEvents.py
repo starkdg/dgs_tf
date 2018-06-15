@@ -99,7 +99,10 @@ def train_model(learning_rate,
     predict_validation_input_fn = create_predict_input_fn(
         validation_examples, validation_targets, batch_size)
 
-    my_optimizer = tf.train.AdagradOptimizer(
+    runconfig = tf.estimator.RunConfig(
+        model_dir="model",
+        keep_checkpoint_max=5)
+    my_optimizer = tf.train.AdamOptimizer(
         learning_rate=learning_rate)
     my_optimizer = tf.contrib.estimator.clip_gradients_by_norm(
         my_optimizer, 5.0)
@@ -108,8 +111,7 @@ def train_model(learning_rate,
         n_classes=3,
         hidden_units=hidden_units,
         optimizer=my_optimizer,
-        model_dir="model"
-    )
+        config=runconfig)
 
     print("Training Model ...")
     training_losses = []
@@ -157,7 +159,7 @@ def train_model(learning_rate,
     plt.plot(validation_losses, label="validation")
     plt.legend()
     plt.draw()
-    plt.pause(5)
+    plt.pause(2)
     input("Hit Enter")
 
     return dnn_classifier
@@ -193,19 +195,32 @@ def run_tests(classifier, examples, targets):
     return accuracy
 
 
+def model_size(estimator):
+    variables = estimator.get_variable_names()
+    size = 0
+    for variable in variables:
+        if not any(x in variable
+                   for x in ['global_step',
+                             'centered_bias_weight',
+                             'bias_weight',
+                             'Adam']):
+            size += np.count_nonzero(estimator.get_variable_value(variable))
+            return size
+
+
 parser = argparse.ArgumentParser(description='ML Touch Events')
-parser.add_argument('-r', '--learning_rate', type=float, default=0.0005, help="Learning rate")
-parser.add_argument('-s', '--steps', type=int, default=500, help="Number of steps")
-parser.add_argument('-b', '--batch_size', type=int, default=5, help="Batch Size")
-parser.add_argument('-l', '--strength', type=float, default=0., help="L1 Regularization Strength")
-parser.add_argument('-a', '--hidden_units', nargs='+', type=int, default = [500, 500, 250], help="hidden units")
+parser.add_argument('-r', '--learning_rate', type=float, default=0.00005, help="Learning rate")
+parser.add_argument('-s', '--steps', type=int, default=100, help="Number of steps")
+parser.add_argument('-b', '--batch_size', type=int, default=10, help="Batch Size")
+# parser.add_argument('-l', '--l1_reg_strength', type=float, default=0., help="L1 Regularization Strength")
+parser.add_argument('-a', '--hidden_units', nargs='+', type=int, default = [600, 600, 200], help="hidden units")
 args = parser.parse_args()
 
 print("parameters:")
 print("alpha = ", args.learning_rate)
 print("steps = ", args.steps)
 print("batch size = ", args.batch_size)
-print("l1 reg. strength = ", args.strength)
+# print("l1 reg. strength = ", args.l1_reg_strength)
 print("no. nodes in hidden layers = ", args.hidden_units)
 src_df = pd.read_csv("touch_events.csv", sep=",")
 
@@ -232,6 +247,9 @@ classifier = train_model(args.learning_rate,
                          validation_examples,
                          validation_targets)
 
+
+modelsz = model_size(classifier)
+print("model size: ", modelsz)
 
 evaluate_classifier(classifier, validation_examples, validation_targets)
 
