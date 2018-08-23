@@ -56,8 +56,8 @@ def train_decision_tree(training_examples, training_targets):
     
 def run_tests(classifier, examples, targets):
     classes = classifier.predict(examples)
-
     target_names = ['b', 'k', 'r']
+
     print("Decision tree accuracy: ", metrics.accuracy_score(targets, classes))
     print(metrics.classification_report(targets, classes, target_names=target_names))
     
