@@ -24,13 +24,13 @@ cp = convphash.ConvPhash(module_url)
 
 
 print("process images in ", args.dir1)
-images1 = cp.process_image_files(args.dir1)
+images1 = cp.process_image_files(args.dir1, limit=500)
 phash1, p1_min, p1_max = cp.image_phashes(images1, ndims=256)
 print("phash size: ", phash1.shape)
 print("range=({0},{1})".format(p1_min, p1_max))
 
 print("process images in ", args.dir2)
-images2 = cp.process_image_files(args.dir2)
+images2 = cp.process_image_files(args.dir2, limit=500)
 phash2, p2_min, p2_max = cp.image_phashes(images2, ndims=256)
 print("phash size: ", phash2.shape)
 print("range=({0},{1})".format(p2_min, p2_max))
@@ -54,7 +54,7 @@ print("  min ", inter_min)
 print("Dissimilarity measures.")
 m, n = phash1.shape
 hamming_intras = []
-for i in range(0, 5):
+for i in range(0, 4):
     x = phash1[:, i]
     for j in range(i+1, n):
         y = phash1[:, j]
